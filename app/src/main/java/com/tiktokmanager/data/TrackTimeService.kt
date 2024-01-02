@@ -1,50 +1,28 @@
 package com.tiktokmanager.data
 
-import android.accessibilityservice.AccessibilityService
-import android.annotation.SuppressLint
-import android.app.ActivityManager
-import android.app.AppOpsManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.Service
+import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
 import android.os.Build
-import android.provider.Settings
-import android.view.accessibility.AccessibilityEvent
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
-import java.util.Timer
-import java.util.TimerTask
 
 
-class TrackTimeService: AccessibilityService() {
-
-    override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val foregroundApp = event.packageName?.toString()
-            if (foregroundApp == "com.zhiliaoapp.musically") {
-                println("tiktok opened")
-            }
-        }
-    }
-
-    override fun onInterrupt() {
-        TODO("Not yet implemented")
-    }
-
+class TrackTimeService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val timer = Timer()
-        val task = object : TimerTask() {
-            override fun run() {
-                if(isTikTokRunning()){
-                    //todo
-                }
-            }
-        }
-
-        timer.scheduleAtFixedRate(task, 0, 5000)
+        startPolling()
         return START_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder? {
+        return null
     }
 
     override fun onCreate() {
@@ -54,31 +32,62 @@ class TrackTimeService: AccessibilityService() {
             .build()
         startForeground(1, notification, FOREGROUND_SERVICE_TYPE_HEALTH)
     }
-    @SuppressLint("ServiceCast")
-    private fun isTikTokRunning(): Boolean {
-        val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-        val time = System.currentTimeMillis()
-        val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, time - 1000 * 60, time)
 
-        if (stats != null && !stats.isEmpty()) {
-            val sortedStats = stats.sortedByDescending { it.lastTimeUsed }
-            println(sortedStats[0].packageName)
-            val topApp = sortedStats[0].packageName
-            return "com.zhiliaoapp.musically" == topApp
+    private fun startPolling() {
+        val handler = Handler(Looper.getMainLooper())
+        val tikTokCheckRunnable = object : Runnable {
+            override fun run() {
+                if (isTikTokRunning()) {
+                    println("way")
+                } else {
+                    println("nay")
+                }
+                handler.postDelayed(
+                    this,
+                    5000
+                )
+            }
         }
-        return false
+        handler.post(tikTokCheckRunnable)
     }
+
+    private fun isTikTokRunning(): Boolean {
+        val usageStatsManager =
+            baseContext.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val startTime = System.currentTimeMillis() - 60 * 60 * 1000
+        val endTime = System.currentTimeMillis()
+        val events = usageStatsManager.queryEvents(startTime, endTime)
+        val tikTokPackageName = "com.zhiliaoapp.musically"
+
+        var isRunning = false
+        val event = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+
+            if (event.packageName == tikTokPackageName) {
+                when (event.eventType) {
+                    UsageEvents.Event.ACTIVITY_RESUMED -> {
+                        isRunning = true
+                    }
+
+                    UsageEvents.Event.ACTIVITY_PAUSED,
+                    UsageEvents.Event.ACTIVITY_STOPPED -> {
+                        isRunning = false
+                    }
+                }
+            }
+        }
+        return isRunning
+    }
+
     private fun createNotificationChannel() {
-        // Create the NotificationChannel, but only on API 26+ because
-        // the NotificationChannel class is not in the Support Library.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = ""
-            val descriptionText = ""
+            val name = "manager"
+            val descriptionText = "sample"
             val importance = NotificationManager.IMPORTANCE_DEFAULT
             val channel = NotificationChannel("manager", name, importance).apply {
                 description = descriptionText
             }
-            // Register the channel with the system.
             val notificationManager: NotificationManager =
                 getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
